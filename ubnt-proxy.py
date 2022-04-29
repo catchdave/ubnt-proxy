@@ -10,10 +10,8 @@ import time
 
 import scapy.all
 
-# Apparently there are two types of request packets, the first seems
-# to be from protect, the second maybe network?
-REQUEST = [bytes([1, 0, 0, 0]),
-           bytes([2, 8, 0, 0])]
+REQUEST = [bytes([1, 0, 0, 0]),  # Unifi discovery version 1
+           bytes([2, 8, 0, 0])]  # Unifi discovery version 2
 LOG = logging.getLogger('unifi_proxy')
 
 
@@ -122,10 +120,11 @@ class Device:
 class DiscoveryProxy:
     """A cross-subnet Unifi Discovery proxy"""
 
-    def __init__(self, disc_ifs, mcast_group, disc_port, interval=10):
+    def __init__(self, disc_ifs, mcast_group, disc_port, interval=10, version=1):
         self._disc_ifs = disc_ifs
         self._disc_port = disc_port
-        self._interval = interval
+        self._interval = interval  # seconds
+        self._version = version
 
         self.mcast_s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.mcast_s.bind(('', self._disc_port))
@@ -275,12 +274,14 @@ def main():
                    help='Only report errors')
     p.add_argument('-d', '--debug', action='store_true',
                    help='Debug output')
+    p.add_argument('-2', '--version2', action='store_true',
+                   help='Use version 2 of discovery packet. This will only discover Cloud Keys')  # Perhaps also the NVRs? Untested
     p.add_argument('--multicast-group', default='233.89.188.1',
                    help='Multicast group to which discoveries are sent')
     p.add_argument('--discovery-port', default=10001,
                    help='Discovery port')
-    p.add_argument('--discovery-interval', default=10,
-                   help='How often to trigger our own discovery')
+    p.add_argument('-i', '--discovery-interval', type=int, default=10,
+                   help='How often to trigger our own discovery in seconds')
     args = p.parse_args()
 
     if args.debug:
@@ -289,12 +290,20 @@ def main():
         level = logging.WARNING
     else:
         level = logging.INFO
-    logging.basicConfig(level=level)
+    logging.basicConfig(
+        format='%(asctime)s [%(levelname)8s] %(message)s',
+        level=level,
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
+    # Set packet version to use
+    version = 2 if args.version2 else 1
 
     try:
         proxy = DiscoveryProxy(args.unifi_if, args.multicast_group,
                                args.discovery_port,
-                               interval=args.discovery_interval)
+                               interval=args.discovery_interval,
+                               version=version)
     except OSError as e:
         LOG.error('Unable to start proxy: %s' % e)
         return 1
