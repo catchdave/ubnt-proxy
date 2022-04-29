@@ -52,7 +52,7 @@ class Device:
                       exc_info=True)
             LOG.warning('Unsupported discovery packet from %s' % self.ip)
         else:
-            LOG.debug('Device properties: %s' % self.attrs)
+            LOG.debug('Device [%s] properties: %s' % (ip, self.attrs))
 
     def parse(self):
         self.attrs = {}
@@ -148,10 +148,8 @@ class DiscoveryProxy:
         if time.time() - self._last_discover > self._interval:
             LOG.info('Sending discover')
             for i, s in zip(self._disc_ifs, self.disc_socks):
-                LOG.debug('Discovering on interface %s' % i)
-                # FIXME: Do we need to also send the other request
-                # packet to pick up other devices?
-                s.sendto(REQUEST[0], ('255.255.255.255', self._disc_port))
+                LOG.debug('Discovering on interface %s using packet version "%d"' % (i, self._version))
+                s.sendto(REQUEST[self._version-1], ('255.255.255.255', self._disc_port))
             self._last_discover = time.time()
             self.rebroadcast_some()
 
@@ -191,12 +189,12 @@ class DiscoveryProxy:
             LOG.warning('No discovered devices to report to %s:%i' % remote)
             return
 
-        LOG.info('Feeding %i discovered devices to %s:%i' % (
-            len(self._discovered), *remote))
-        LOG.debug('Devices: %s' % ','.join(
-            d.ip for d in self._discovered.values()))
         # Feed all our discovered devices to a remote requester
+        fed_count = 0
         for device in self._discovered.values():
+            if device.ip == remote[0]:
+                LOG.debug("Skipping feeding packet of device to itself (%s)" % remote[0])
+                continue
             if device.ip in self._disc_ifs:
                 raise Exception('Sending my own packet!')
             packet = (scapy.all.IP(src=device.ip, dst=remote[0]) /
@@ -207,9 +205,12 @@ class DiscoveryProxy:
             # address as the actual device.
             try:
                 scapy.all.send(packet, verbose=False)
+                fed_count += 1
             except PermissionError:
                 LOG.error('Unable to send spoofed packet; am I root?')
                 break
+        LOG.info('Discover request from %s:%i. Fed %i devices.' % (*remote, fed_count))
+        LOG.debug('Devices: %s' % ','.join(d.ip for d in self._discovered.values()))
 
     def saw_device(self, device, via=None):
         if device.key not in self._discovered:
