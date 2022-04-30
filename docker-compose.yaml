@@ -1,0 +1,26 @@
+version: '3'
+
+services:
+  unifi-proxy-auto:
+    container_name: unifi-proxy-auto-1
+    image: unifi-proxy-auto:latest
+    command: -2 -i 30 .
+    ports:
+      - 0.0.0.0:10001:10001/udp
+    environment:
+      TZ: "America/Los_Angeles"
+      PGID: 100
+      PUID: 1033
+    restart: unless-stopped
+    
+    networks:
+      wired.macvlan:
+        ipv4_address: 192.168.x.x
+      wifi.macvlan:
+        ipv4_address: 192.168.x.x
+
+networks:
+  wired.macvlan:
+    external: true
+  wifi.macvlan:
+    external: true
