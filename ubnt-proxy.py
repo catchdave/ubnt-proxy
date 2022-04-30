@@ -103,10 +103,8 @@ class Device:
 
     @property
     def needs_broadcast(self):
-        # Apparently UAPs need to broadcast their presence for the
-        # network controller to pick them up. I'm not sure how to
-        # best determine which devices need that, but this is the
-        # logic to decide.
+        # Apparently UAPs need to broadcast their presence for the network controller to pick them up. I'm not sure how to
+        # best determine which devices need that, but this is the logic to decide.
         return ((self.attrs.get('Name') in ['UBNT'] or
                  'UAP' in self.attrs.get('Name', '')) and
                 self.recv_addr != '0.0.0.0')
@@ -167,12 +165,11 @@ class DiscoveryProxy:
                 del self._discovered[key]
 
     def rebroadcast_some(self):
-        # Devices that need to be re-broadcasted must have been
-        # received once via non-multicast path so we know where they
-        # came from. The multicast and broadcast packets seem to be
-        # different sometimes, so we likely have two copies in our
-        # list. Find one from the same mac that has a recv_addr on it
-        # and re-broadcast to all other interfaces.
+        """
+        Devices that need to be re-broadcasted must have been received once via non-multicast path so we know where they
+        # came from. The multicast and broadcast packets seem to be different sometimes, so we likely have two copies in our
+        # list. Find one from the same mac that has a recv_addr on it and re-broadcast to all other interfaces.
+        """
         broadcast = [d for d in self._discovered.values() if d.needs_broadcast]
         for device in broadcast:
             try:
@@ -205,16 +202,16 @@ class DiscoveryProxy:
             packet = (scapy.IP(src=device.ip, dst=remote[0]) /
                       scapy.UDP(sport=10001, dport=remote[1]) /
                       device.data)
-            # This requires root, but avoids the problem of android
-            # devices needing to see the packet coming from the same
-            # address as the actual device.
+            # This requires root, but avoids the problem of android devices needing to see the
+            # packet coming from the same address as the actual device.
             try:
                 scapy.send(packet, verbose=False)
                 fed_count += 1
             except PermissionError:
                 LOG.error('Unable to send spoofed packet; am I root?')
                 break
-        LOG.info('Discover request from %s:%i. Fed %i devices.' % (*remote, fed_count))
+        f_log_level = (logging.INFO if fed_count > 0 else logging.DEBUG)
+        LOG.log(f_log_level, 'Discover request from %s:%i. Fed %i devices.' % (*remote, fed_count))
         LOG.debug('Devices: %s' % ','.join(d.ip for d in self._discovered.values()))
 
     def saw_device(self, device, via=None):
@@ -222,13 +219,13 @@ class DiscoveryProxy:
             try:
                 LOG.info('New %s device %r found at %s (version %s)' % (
                     device.attrs['Model'], device.attrs['Name'],
-                    device.ip, device.attrs['Firmware version']))
+                    device.ip, device.attrs['Firmware version'])
+                )
             except KeyError:
                 LOG.info('New device found at %s' % device.ip)
         else:
             # If we also received this via multicast, we need to
-            # retain the interface affinity so we know not to
-            # rebroadcast it on the same subnet.
+            # retain the interface affinity so we know not to rebroadcast it on the same subnet.
             device.recv_addr = self._discovered[device.key].recv_addr
 
         if via:
@@ -238,8 +235,7 @@ class DiscoveryProxy:
 
     def process_loop(self):
         while True:
-            r, _w, _x = select.select([self.mcast_s] + self.disc_socks, [], [],
-                                      10)
+            r, _w, _x = select.select([self.mcast_s] + self.disc_socks, [], [], 10)
             if self.mcast_s in r:
                 data, remote = self.mcast_s.recvfrom(1024)
                 if remote[0] in self._disc_ifs:
@@ -247,14 +243,10 @@ class DiscoveryProxy:
                 LOG.debug('Multicast %s from %s:%i' % (
                     data in REQUEST and 'request' or 'response', *remote))
                 if data in REQUEST:
-                    # If this is a request packet from someone other
-                    # than ourselves, we feed them the devices we know
-                    # about. We also trigger another discovery if it
-                    # has been long enough. Doing it here means we
-                    # don't constantly discover devices if nothing is
-                    # looking for them, but it also means we won't
-                    # respond to the first request packet in a long
-                    # time with a fresh list.
+                    # If this is a request packet from someone other than ourselves, we feed them the devices we know
+                    # about. We also trigger another discovery if it has been long enough. Doing it here means we
+                    # don't constantly discover devices if nothing is looking for them, but it also means we won't
+                    # respond to the first request packet in a long time with a fresh list.
                     self.feed_discovery(remote)
                     self.discovery_tick()
                 else:
@@ -273,6 +265,9 @@ class DiscoveryProxy:
 
     @staticmethod
     def discover_iface_ips():
+        """
+        Discovers IP addresses of all working, non-localhost interfaces.
+        """
         all_ips = [scapy.get_if_addr(iface) for iface in scapy.get_working_ifaces()]
         filtered_ips = [ip for ip in all_ips if ip != '0.0.0.0' and ip != '127.0.0.1']
         return filtered_ips
