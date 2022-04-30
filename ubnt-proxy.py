@@ -8,11 +8,12 @@ import struct
 import sys
 import time
 
-import scapy.all
+import scapy.all as scapy
 
 REQUEST = [bytes([1, 0, 0, 0]),  # Unifi discovery version 1
            bytes([2, 8, 0, 0])]  # Unifi discovery version 2
 LOG = logging.getLogger('unifi_proxy')
+BIND_TO_ALL = '.'
 
 
 def format_mac(d):
@@ -127,10 +128,14 @@ class DiscoveryProxy:
         self._version = version
 
         self.mcast_s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.mcast_s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.mcast_s.bind(('', self._disc_port))
         mreq = socket.inet_aton(mcast_group) + socket.inet_aton('0.0.0.0')
         self.mcast_s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP,
                                 mreq)
+
+        if self._disc_ifs[0] == BIND_TO_ALL:
+            self._disc_ifs = DiscoveryProxy.discover_iface_ips()
 
         self.disc_socks = []
         for iface in self._disc_ifs:
@@ -197,14 +202,14 @@ class DiscoveryProxy:
                 continue
             if device.ip in self._disc_ifs:
                 raise Exception('Sending my own packet!')
-            packet = (scapy.all.IP(src=device.ip, dst=remote[0]) /
-                      scapy.all.UDP(sport=10001, dport=remote[1]) /
+            packet = (scapy.IP(src=device.ip, dst=remote[0]) /
+                      scapy.UDP(sport=10001, dport=remote[1]) /
                       device.data)
             # This requires root, but avoids the problem of android
             # devices needing to see the packet coming from the same
             # address as the actual device.
             try:
-                scapy.all.send(packet, verbose=False)
+                scapy.send(packet, verbose=False)
                 fed_count += 1
             except PermissionError:
                 LOG.error('Unable to send spoofed packet; am I root?')
@@ -266,11 +271,17 @@ class DiscoveryProxy:
                     if data not in REQUEST:
                         device = self.saw_device(Device(remote[0], data), a)
 
+    @staticmethod
+    def discover_iface_ips():
+        all_ips = [scapy.get_if_addr(iface) for iface in scapy.get_working_ifaces()]
+        filtered_ips = [ip for ip in all_ips if ip != '0.0.0.0' and ip != '127.0.0.1']
+        return filtered_ips
+
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('unifi_if', nargs='+',
-                   help='IP of the interface on the unifi subnet')
+                   help='IP of the interface on the unifi subnet. Use "{}" to bind to all interfaces available'.format(BIND_TO_ALL))
     p.add_argument('-q', '--quiet', action='store_true',
                    help='Only report errors')
     p.add_argument('-d', '--debug', action='store_true',
@@ -301,6 +312,7 @@ def main():
     version = 2 if args.version2 else 1
 
     try:
+        LOG.debug("Parameters: %s" % args)
         proxy = DiscoveryProxy(args.unifi_if, args.multicast_group,
                                args.discovery_port,
                                interval=args.discovery_interval,
